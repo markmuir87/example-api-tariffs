@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tariffs Example</title>
+  <meta charset="UTF-8">
+  <script src="https://code.jquery.com/jquery-2.2.0.min.js"></script>
+  <!-- look and feel -->
+  <link rel="stylesheet" type="text/css" href="../example-api-common/style.css">
+  <link rel="stylesheet" type="text/css" href="http://blog.dfilimonov.com/github-ribbons-css/ribbons.css">
+  <script src="../example-api-common/style.js"></script>
+  <!-- shared sources -->
+  <script src="../example-api-common/common.js"></script>
+</head>
+<body>
+  <div id="header"></div>
+  
+  <div id="example" class="content">
+    <h1>API Tariffs Example</h1>
+  
+    <div id="loading">
+      Please wait while it loads.
+    </div>
+    <!-- ----------------------------------------------------------------- -->
+    <!-- Part 1: Selection of agreeement, country and heading -->
+    <!-- ----------------------------------------------------------------- -->
+    <div id="agreements" style="display: hide;">
+      <h2>Select Heading</h2>
+      Please select an agreement:
+      <select id="agreementSelection">
+      </select>
+
+      <div id="countries" style="display: hide;">
+        Please select a country:
+        <select id="countrySelection">
+        </select>
+
+        <div id="headings" style="display: hide;">
+          Please select a heading:
+          <select id="headingSelection" style="overflow-x: hidden; width: 300px;">
+          </select>
+          
+          <br />
+          
+          <button id="loadHeading">Show</button>
+          
+        </div>
+      </div>
+    </div>
+    <script>
+      // we will have populated this by the end
+      var agreements = null;
+      var hierarchy = null;
+      var selectedAgreement = null;
+      var selectedCountry = null;
+      var selectedHeading = null;
+      
+      // load and show a list of agreements
+      $(document).ready(function()
+      {
+        $.invoke('/tariffs/agreements', function(agreements_)
+        {
+          agreements = agreements_;
+          $('#agreementSelection').html(Object.keys(agreements).sort().map(function(agreement)
+          {
+            return '<option value="' + agreement + '">' + agreement + ' - ' + agreements[agreement].agreementFullName + '</option>';
+          }).join(''));
+          $('#agreementSelection').change();
+          $('#agreements').show();
+          $('#loading').hide();
+        });
+        
+        $.invoke('/tariffs/hierarchy', function(hierarchy_)
+        {
+          hierarchy = hierarchy_;
+          $('#headingSelection').html(Object.keys(hierarchy).filter(function(hscode)
+          {
+            return hierarchy[hscode].type == 'heading';
+          }).sort().map(function(heading)
+          {
+            return '<option value="' + heading + '">' + heading + ' - ' + hierarchy[heading].description + '</option>';
+          }).join(''));
+          $('#headingSelection').change();
+          $('#headings').show();
+        });
+        
+      });
+      $('#agreementSelection').change(function()
+      {
+        selectedAgreement = $('#agreementSelection').val();
+        var countries = agreements[selectedAgreement].countries;
+        
+        $('#countrySelection').html(Object.keys(countries).sort().map(function(country)
+        {
+          return '<option value="' + country + '">' + country + ' - ' + countries[country].countryFullName + '</option>';
+        }).join(''));
+        
+        $('#countrySelection').change();
+        $('#countries').show();
+      });
+      
+      $('#countrySelection').change(function()
+      {
+        selectedCountry = $('#countrySelection').val();
+      });
+      
+      $('#headingSelection').change(function()
+      {
+        selectedHeading = $('#headingSelection').val();
+      });
+      
+    </script>
+    
+    <!-- ----------------------------------------------------------------- -->
+    <!-- Part 2: Load heading data and display a hierarchy of subheading items -->
+    <!-- ----------------------------------------------------------------- -->
+    
+    <div id="hierarchy" style="display: none;">
+      <h2>Select Item</h2>
+      <div id="part1Selection"></div>
+      <div id="hierarchyLoading">Please wait while it loads</div>
+      <div id="headingHierarchy"></div>
+    </div>
+    
+    <script>
+      var headingData = null;
+      
+      $('#loadHeading').click(function()
+      {
+        $('#part1Selection').html(selectedAgreement + ' - ' + selectedCountry + ' - ' + selectedHeading);
+        $.invoke('/tariffs/heading/' + selectedHeading, function(headingData_)
+        {
+          headingData = headingData_;
+          showSelectedHeadingHierarchy();
+          $('#hierarchyLoading').hide();
+        });
+        $('#hierarchy').show();
+        // $('#agreements').hide();
+      });
+      
+      function beautifyHSCode(code, showLabel)
+      {
+        var hscode = code.replace(/[^0-9]/g, '');
+        switch (hscode.length)
+        {
+        case 0:
+          return (showLabel ? 'Section ' : '') + code;
+        case 1:
+        case 2:
+          return (showLabel ? 'Chapter ' : '') + hscode;
+        case 3:
+        case 4:
+          return (showLabel ? 'Heading ' : '') + hscode;
+        case 5:
+        case 6:
+          return (showLabel ? 'Subheading ' : '') + hscode.substr(0, 4) + '.' + hscode.substr(4);
+        default:
+          return (showLabel ? 'Item ' : '') + hscode.substr(0, 4) + '.' + hscode.substr(4, 2) + '.' + hscode.substr(6);
+        }
+      }
+      
+      function showSelectedHeadingHierarchy()
+      {
+        var agreementCountrydata = headingData[selectedCountry][selectedAgreement];
+        
+        // build a tree out of this data for user friendly presentation
+        
+        var tree = {};
+        
+        Object.keys(agreementCountrydata).forEach(function(key)
+        {
+          tree[key] = tree[key] || {};
+          tree[key].key = key;
+        });
+
+        Object.keys(tree).sort().reverse().forEach(function(key)
+        {
+          var parent = key;
+          while (parent.length > 4)
+          {
+            parent = parent.substr(0, parent.length -1);
+            if (parent in tree)
+            {
+              tree[parent].children = tree[parent].children || {}
+              tree[parent].children[key] = tree[key];
+              delete tree[key];
+              break;
+            }
+          }
+        });
+        
+        var html = '';
+        html += '<ul>';
+        
+        function renderNode(object)
+        {
+          var html = '';
+          html += '<li>';
+          if (object.key)
+          {
+            var item = agreementCountrydata[object.key];
+            if (item.tariffs)
+            {
+              html += '<a href="javascript:loadItem(\'' + object.key + '\')">';
+            }
+            html += beautifyHSCode(object.key) + ' - ' + item.description;
+            if (item.tariffs)
+            {
+              html += '</a>';
+            }
+          }
+          if (object.children)
+          {
+            html += '<ul>';
+            Object.keys(object.children).forEach(function(childKey)
+            {
+              html += renderNode(object.children[childKey]);
+            });
+            html += '</ul>';
+          }
+          html += '</li>';
+          return html;
+        }
+        
+        html += renderNode({children: tree});
+        
+        html += '</ul>'
+        $('#headingHierarchy').html(html);
+      }
+      
+    </script>
+    
+    <!-- ----------------------------------------------------------------- -->
+    <!-- Part 3: Display details of a particular product -->
+    <!-- ----------------------------------------------------------------- -->
+    
+    <div id="details" style="display: none;">
+      <h2>Item Details</h2>
+      <h3>HS Code</h3>
+      <p id="hscode">Loading...</p>
+      <h3>Description</h3>
+      <p id="description">Loading...</p>
+      <h3>Country</h3>
+      <p id="country">Loading...</p>
+      <h3>Agreement</h3>
+      <p id="agreement">Loading...</p>
+      <h3>Tariff Schedule</h3>
+      <table border="1">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Tariff</th>
+          </tr>
+        </thead>
+        <tbody id="tariffSchedule"></tbody>
+      </table>
+      <h3>Notes</h3>
+      <p id="notes">Loading...</p>
+      <h3>Product Specific Rules</h3>
+      <p id="psr">Loading...</p>
+      
+      <h3>RAW DATA</h3>
+      <pre id="raw1"></pre>
+      <pre id="raw2"></pre>
+      <pre id="raw3"></pre>
+    </div>
+    
+    <script src="formula.js"></script>
+    <script src="psr.js"></script>
+    
+    <script>
+      // Assume we already know what we want. I.e. want to export to a particular
+      // country under a particular HS code under a particular agreement.
+      
+      // export boneless beef to japan
+      var selectedCountry = 'JPN';
+      var hsCode = '020230030'; 
+      var selectedAgreement = 'JAEPA';
+
+      function loadItem(hsCode)
+      {
+        var agreementData = agreements[selectedAgreement];
+        var countryData = agreementData.countries[selectedCountry];
+        var hsData = headingData[selectedCountry][selectedAgreement][hsCode];
+        
+        $('#hscode').html(beautifyHSCode(hsCode));
+        $('#description').html(hsData.description);
+        $('#country').html(countryData.countryAcronym + ' - ' + countryData.countryFullName);
+        $('#agreement').html(agreementData.agreementAcronym + ' - ' + agreementData.agreementFullName);
+        
+        var dates = countryData.tariffs.dates;
+        var baseRate = hsData.tariffs.default.baseRate;
+        var rates = hsData.tariffs.default.rates;
+        
+        $('#tariffSchedule').html('<tr><th>' + 'Base Rate' + '</th><td>' + TariffFormula.parse(baseRate).friendly + '</td></tr>');
+        rates.forEach(function(rate, index)
+        {
+          $('#tariffSchedule').append('<tr><th>' + dates[index] + '</th><td>' + TariffFormula.parse(rate).friendly + '</td></tr>');
+        });
+        
+        $('#notes').html((countryData.tariffs.default.notes || '') + (hsData.tariffs.default.notes || ''));
+        
+        $('#psr').html(TariffPSR.parse(hsData.tariffs.productSpecificRules, agreementData.rulesOfOrigin).official);
+        
+        $('#raw3').html(JSON.stringify(agreementData, null, 2));
+        $('#raw2').html(JSON.stringify(countryData, null, 2));
+        $('#raw1').html(JSON.stringify(hsData, null, 2));
+        
+        $('#details').show();
+        // $('#hierarchy').hide();
+      };
+    </script>
+  </div>
+  
+  <div id="footer"></div>
+  
+  
+</body>
+</html>
