@@ -211,7 +211,7 @@
           if (object.children)
           {
             html += '<ul>';
-            Object.keys(object.children).forEach(function(childKey)
+            Object.keys(object.children).sort().forEach(function(childKey)
             {
               html += renderNode(object.children[childKey]);
             });
